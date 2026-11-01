@@ -2366,16 +2366,30 @@ async function gatherExport(){
   var sessions = state.sessions.slice();
   var programs = state.programs.slice();
   var customs = state.customExercises.slice();
-  if(state.backend==="db" && dbNs){
-    try{
-      var ss = await sessionsCol().orderBy("date","desc").limit(1000).get();
-      sessions = ss.docs.map(function(d){ return {id:d.id, data:d.data()}; });
-      var ps = await programsCol().limit(1000).get();
-      programs = ps.docs.map(function(d){ return {id:d.id, data:d.data()}; });
-      var cs = await customCol().limit(1000).get();
-      customs = cs.docs.map(function(d){ var x=d.data(); return {id:d.id, name:x.name, muscle:x.muscle, equip:x.equip}; });
-    }catch(e){ /* use what is already loaded */ }
+  /* Start from what the app has loaded, then add anything extra the database returns.
+     A database read can only ADD to the export, never empty it. */
+  function mergeById(base, extra){
+    var byId = {};
+    base.forEach(function(x){ byId[x.id] = x; });
+    extra.forEach(function(x){ if(x && x.id) byId[x.id] = x; });
+    return Object.keys(byId).map(function(k){ return byId[k]; });
   }
+  if(dbNs){
+    try{
+      var ss = await sessionsCol().limit(1000).get();
+      sessions = mergeById(sessions, ss.docs.map(function(d){ return {id:d.id, data:d.data()}; }));
+    }catch(e){}
+    try{
+      var ps = await programsCol().limit(1000).get();
+      programs = mergeById(programs, ps.docs.map(function(d){ return {id:d.id, data:d.data()}; }));
+    }catch(e){}
+    try{
+      var cs = await customCol().limit(1000).get();
+      customs = mergeById(customs, cs.docs.map(function(d){ var x=d.data(); return {id:d.id, name:x.name, muscle:x.muscle, equip:x.equip}; }));
+    }catch(e){}
+  }
+  sessions = sessions.filter(function(s){ return s && s.data && s.data.date; });
+  sessions.sort(function(a,b){ return a.data.date < b.data.date ? 1 : -1; });
   if(state.today && state.today.exercises.length){
     var tid = state.todayId || "__today__";
     var copy = JSON.parse(JSON.stringify(state.today));
@@ -2415,6 +2429,10 @@ async function saveTextFile(filename, text){
 
 async function exportData(){
   var data = await gatherExport();
+  if(!data.sessions.length && !data.programs.length){
+    toast("Nothing to export yet: no sessions or programs found");
+    return;
+  }
   var name = "repledger-backup-"+todayKey()+".json";
   try{
     var r = await saveTextFile(name, JSON.stringify(data, null, 1));
