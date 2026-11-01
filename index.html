@@ -517,6 +517,7 @@ var RAW_EXERCISES = [
 ["Pec Deck Machine","Chest","Machine"],["Chest Press Machine","Chest","Machine"],
 ["Push-Up","Chest","Bodyweight"],["Weighted Dip","Chest","Bodyweight"],
 ["Smith Machine Bench Press","Chest","Smith Machine"],
+["Incline Machine Chest Press","Chest","Machine","l4syy56h42wk8y9fpwmd"],["Machine Chest Fly","Chest","Machine","u2zy7j93rh5px9i8o16w"],
 
 ["Deadlift","Back","Barbell"],["Sumo Deadlift","Back","Barbell"],["Pull-Up","Back","Bodyweight"],
 ["Chin-Up","Back","Bodyweight"],["Lat Pulldown","Back","Cable"],["Close-Grip Lat Pulldown","Back","Cable"],
@@ -524,14 +525,14 @@ var RAW_EXERCISES = [
 ["Pendlay Row","Back","Barbell"],["T-Bar Row","Back","Machine"],["One-Arm Dumbbell Row","Back","Dumbbell"],
 ["Single-Arm Cable Row","Back","Cable"],["Straight-Arm Pulldown","Back","Cable"],
 ["Face Pull","Back","Cable"],["Rack Pull","Back","Barbell"],["Good Morning","Back","Barbell"],
-["Back Extension","Back","Bodyweight"],
+["Back Extension","Back","Bodyweight"],["Chest Supported Incline Row","Back","Smith Machine","xl2p9leyq0xyzes85uql"],
 
 ["Overhead Barbell Press","Shoulders","Barbell"],["Seated Dumbbell Shoulder Press","Shoulders","Dumbbell"],
 ["Arnold Press","Shoulders","Dumbbell"],["Push Press","Shoulders","Barbell"],
 ["Lateral Raise","Shoulders","Dumbbell"],["Cable Lateral Raise","Shoulders","Cable"],
 ["Front Raise","Shoulders","Dumbbell"],["Rear Delt Fly","Shoulders","Dumbbell"],
 ["Reverse Pec Deck","Shoulders","Machine"],["Upright Row","Shoulders","Barbell"],
-["Machine Shoulder Press","Shoulders","Machine"],
+["Machine Shoulder Press","Shoulders","Machine"],["Seated Lateral Raise","Shoulders","Dumbbell","8l9aze6ya314o0ci0ups"],
 
 ["Barbell Shrug","Traps","Barbell"],["Dumbbell Shrug","Traps","Dumbbell"],
 ["Trap Bar Shrug","Traps","Barbell"],["Smith Machine Shrug","Traps","Smith Machine"],
@@ -582,7 +583,7 @@ var RAW_EXERCISES = [
 ["Hanging Knee Raise","Core","Bodyweight"],["Sit-Up","Core","Bodyweight"],
 ["Russian Twist","Core","Bodyweight"],["Ab Wheel Rollout","Core","Bodyweight"],
 ["Weighted Sit-Up","Core","Dumbbell"],["Mountain Climber","Core","Bodyweight"],
-["Flutter Kicks","Core","Bodyweight"],["Cable Woodchopper","Core","Cable"],["Dragon Flag","Core","Bodyweight"],
+["Flutter Kicks","Core","Bodyweight"],["Machine Crunches","Core","Machine","zvk3fjtf13yt7xvfthlg"],["Cable Woodchopper","Core","Cable"],["Dragon Flag","Core","Bodyweight"],
 
 ["Treadmill Run","Cardio","Cardio"],["Stationary Bike","Cardio","Cardio"],["Rowing Machine","Cardio","Cardio"],
 ["Elliptical","Cardio","Cardio"],["Stair Climber","Cardio","Cardio"],["Jump Rope","Cardio","Cardio"],
@@ -596,10 +597,13 @@ var RAW_EXERCISES = [
 ];
 
 var EXERCISES = RAW_EXERCISES.map(function(r){
-  return { id: slugify(r[0]), name: r[0], muscle: r[1], equip: r[2] };
+  return { id: r[3] || slugify(r[0]), name: r[0], muscle: r[1], equip: r[2] };
 });
 var EX_BY_ID = {};
 EXERCISES.forEach(function(e){ EX_BY_ID[e.id] = e; });
+var BUILTIN_IDS = {};
+EXERCISES.forEach(function(e){ BUILTIN_IDS[e.id] = true; });
+function notBuiltIn(e){ return e && !BUILTIN_IDS[e.id]; }
 
 var MUSCLES = ["All","Chest","Back","Shoulders","Traps","Neck","Biceps","Triceps","Forearms","Quads","Hamstrings","Glutes","Calves","Core","Cardio","Full Body"];
 var EQUIPMENT = ["Barbell","Dumbbell","Machine","Cable","Bodyweight","Kettlebell","Smith Machine","EZ Bar","Cardio"];
@@ -701,6 +705,7 @@ var CUSTOM_LS_KEY = "repledger_custom_exercises_v1";
 function loadLocalCustom(){
   try{ state.customExercises = JSON.parse(localStorage.getItem(CUSTOM_LS_KEY) || "[]"); }
   catch(e){ state.customExercises = []; }
+  state.customExercises = state.customExercises.filter(notBuiltIn);
   state.customExercises.forEach(function(e){ EX_BY_ID[e.id] = e; });
 }
 function saveLocalCustomList(){
@@ -746,6 +751,7 @@ function hiddenExercisesDoc(){ return dbNs.doc("settings/hiddenExercises"); }
 
 function refreshCustomFromSnapshot(snap){
   var list = snap.docs.map(function(d){ var data=d.data(); return {id:d.id, name:data.name, muscle:data.muscle, equip:data.equip}; });
+  list = list.filter(notBuiltIn);
   state.customExercises = list;
   list.forEach(function(e){ EX_BY_ID[e.id] = e; });
 }
