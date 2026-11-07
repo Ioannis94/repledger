@@ -427,6 +427,11 @@ main#view{ flex:1; padding:16px 16px 100px; }
 .exh-set-n{ width:16px; text-align:right; color:var(--text-dim); font-weight:500; }
 .exh-empty{ color:var(--text-dim); font-size:14px; padding:18px 0; }
 
+.new-program-btn{ display:flex; width:fit-content; margin:16px auto 0; padding:7px 14px; font-size:13px; }
+.new-program-btn svg{ width:14px; height:14px; }
+.exedit-box{ max-width:340px; }
+.exedit-title{ font-family:var(--font-display); font-size:17px; font-weight:600; text-transform:uppercase; letter-spacing:.02em; margin-bottom:14px; }
+.exedit-reset{ display:block; width:100%; background:none; border:none; color:var(--accent-2); font-size:13px; font-weight:600; padding:12px 0 0; cursor:pointer; text-decoration:underline; text-underline-offset:2px; }
 .data-section{ margin-bottom:18px; }
 .data-section p{ margin:0 0 10px; font-size:13.5px; color:var(--text-dim); line-height:1.45; }
 .data-section .btn{ width:100%; }
@@ -604,6 +609,19 @@ EXERCISES.forEach(function(e){ EX_BY_ID[e.id] = e; });
 var BUILTIN_IDS = {};
 EXERCISES.forEach(function(e){ BUILTIN_IDS[e.id] = true; });
 function notBuiltIn(e){ return e && !BUILTIN_IDS[e.id]; }
+var BUILTIN_ORIG = {};
+EXERCISES.forEach(function(e){ BUILTIN_ORIG[e.id] = {name:e.name, muscle:e.muscle, equip:e.equip}; });
+var exerciseOverrides = {};
+/* Apply per-user edits of built-in exercises (name / muscle / equipment) in place. */
+function applyOverrides(map){
+  exerciseOverrides = map || {};
+  EXERCISES.forEach(function(e){
+    var o = exerciseOverrides[e.id], base = BUILTIN_ORIG[e.id];
+    e.name = (o && o.name) || base.name;
+    e.muscle = (o && o.muscle) || base.muscle;
+    e.equip = (o && o.equip) || base.equip;
+  });
+}
 
 var MUSCLES = ["All","Chest","Back","Shoulders","Traps","Neck","Biceps","Triceps","Forearms","Quads","Hamstrings","Glutes","Calves","Core","Cardio","Full Body"];
 var EQUIPMENT = ["Barbell","Dumbbell","Machine","Cable","Bodyweight","Kettlebell","Smith Machine","EZ Bar","Cardio"];
@@ -721,6 +739,16 @@ function saveLocalHidden(){
   localStorage.setItem(HIDDEN_LS_KEY, JSON.stringify(state.hiddenBuiltIns));
 }
 
+var OVERRIDES_LS_KEY = "repledger_exercise_overrides_v1";
+function loadLocalOverrides(){
+  var m = {};
+  try{ m = JSON.parse(localStorage.getItem(OVERRIDES_LS_KEY) || "{}") || {}; }catch(e){}
+  applyOverrides(m);
+}
+function saveLocalOverrides(){
+  localStorage.setItem(OVERRIDES_LS_KEY, JSON.stringify(exerciseOverrides));
+}
+
 var PROGRAMS_LS_KEY = "repledger_programs_v1";
 function loadLocalPrograms(){
   try{
@@ -748,6 +776,12 @@ function sessionsCol(){ return dbNs.collection("sessions"); }
 function customCol(){ return dbNs.collection("customExercises"); }
 function programsCol(){ return dbNs.collection("programs"); }
 function hiddenExercisesDoc(){ return dbNs.doc("settings/hiddenExercises"); }
+function overridesDoc(){ return dbNs.doc("settings/exerciseOverrides"); }
+function refreshOverridesFromSnapshot(snap){
+  applyOverrides((snap.exists && snap.data().map) ? snap.data().map : {});
+  var overlay = document.getElementById("sheetOverlay");
+  if(overlay && overlay.hidden) render();
+}
 
 function refreshCustomFromSnapshot(snap){
   var list = snap.docs.map(function(d){ var data=d.data(); return {id:d.id, name:data.name, muscle:data.muscle, equip:data.equip}; });
@@ -789,6 +823,70 @@ function deleteCustomExercise(id){
   state.customExercises = state.customExercises.filter(function(e){ return e.id!==id; });
   if(state.backend==="db" && dbNs){ dbNs.doc("customExercises/"+id).delete().catch(function(){}); }
   else { saveLocalCustomList(); }
+}
+
+function saveExerciseEdit(id, name, muscle, equip){
+  name = String(name).replace(/[<>]/g,"").trim();
+  var isCustom = state.customExercises.find(function(e){ return e.id===id; });
+  if(isCustom){
+    isCustom.name = name; isCustom.muscle = muscle; isCustom.equip = equip;
+    EX_BY_ID[id] = isCustom;
+    if(state.backend==="db" && dbNs){ dbNs.doc("customExercises/"+id).set({name:name, muscle:muscle, equip:equip}).catch(function(){ saveLocalCustomList(); }); }
+    else { saveLocalCustomList(); }
+    return;
+  }
+  if(!BUILTIN_ORIG[id]) return;
+  var base = BUILTIN_ORIG[id];
+  var map = JSON.parse(JSON.stringify(exerciseOverrides));
+  if(name===base.name && muscle===base.muscle && equip===base.equip){ delete map[id]; }
+  else { map[id] = {name:name, muscle:muscle, equip:equip}; }
+  applyOverrides(map);
+  if(state.backend==="db" && dbNs){ overridesDoc().set({map: map}).catch(function(){ saveLocalOverrides(); }); }
+  else { saveLocalOverrides(); }
+}
+
+function openExerciseEditor(id){
+  var info = EX_BY_ID[id];
+  if(!info) return;
+  var isBuiltIn = !!BUILTIN_ORIG[id];
+  var edited = isBuiltIn && !!exerciseOverrides[id];
+  var overlay = document.getElementById("confirmOverlay");
+  overlay.hidden = false;
+  overlay.innerHTML = '<div class="confirm-box exedit-box" role="dialog" aria-label="Edit exercise">'+
+    '<div class="exedit-title">Edit Exercise</div>'+
+    '<div class="form-row"><label class="field-label">Exercise name</label><input class="text-input" id="exEditName"></div>'+
+    '<div class="form-grid-2">'+
+      '<div class="form-row"><label class="field-label">Muscle</label><select class="select-input" id="exEditMuscle">'+
+        MUSCLES.slice(1).map(function(mm){ return '<option value="'+mm+'"'+(mm===info.muscle?" selected":"")+'>'+mm+"</option>"; }).join("")+
+      "</select></div>"+
+      '<div class="form-row"><label class="field-label">Equipment</label><select class="select-input" id="exEditEquip">'+
+        EQUIPMENT.map(function(eq){ return '<option value="'+eq+'"'+(eq===info.equip?" selected":"")+'>'+eq+"</option>"; }).join("")+
+      "</select></div>"+
+    "</div>"+
+    '<div class="confirm-actions" style="margin-top:4px">'+
+      '<button class="btn btn-ghost" id="exEditCancel">Cancel</button>'+
+      '<button class="btn btn-accent" id="exEditSave">Save</button>'+
+    "</div>"+
+    (edited ? '<button class="exedit-reset" id="exEditReset">Reset to original ('+escHtml(BUILTIN_ORIG[id].name)+')</button>' : "")+
+  "</div>";
+  var nameInp = document.getElementById("exEditName");
+  nameInp.value = info.name;
+  function close(){ overlay.hidden = true; overlay.innerHTML = ""; overlay.removeEventListener("click", onBg); }
+  function onBg(ev){ if(ev.target===overlay) close(); }
+  overlay.addEventListener("click", onBg);
+  document.getElementById("exEditCancel").addEventListener("click", close);
+  document.getElementById("exEditSave").addEventListener("click", function(){
+    var name = nameInp.value.trim();
+    if(!name){ toast("Enter a name first"); return; }
+    saveExerciseEdit(id, name, document.getElementById("exEditMuscle").value, document.getElementById("exEditEquip").value);
+    close(); refreshCurrentList(); toast("Exercise updated");
+  });
+  var reset = document.getElementById("exEditReset");
+  if(reset) reset.addEventListener("click", function(){
+    var b = BUILTIN_ORIG[id];
+    saveExerciseEdit(id, b.name, b.muscle, b.equip);
+    close(); refreshCurrentList(); toast("Reset to original");
+  });
 }
 
 function hideBuiltInExercise(id){
@@ -840,6 +938,7 @@ async function initStorage(){
   loadLocalCustom();
   loadLocalPrograms();
   loadLocalHidden();
+  loadLocalOverrides();
   ensureToday();
   renderAll();
   if(!window.claude || !window.claude.use){ state.backend="local"; return; }
@@ -851,6 +950,7 @@ async function initStorage(){
       customCol().limit(300).onSnapshot(refreshCustomFromSnapshot, function(){});
       programsCol().limit(100).onSnapshot(refreshProgramsFromSnapshot, function(){});
       hiddenExercisesDoc().onSnapshot(refreshHiddenFromSnapshot, function(){});
+      overridesDoc().onSnapshot(refreshOverridesFromSnapshot, function(){});
     }
   }catch(e){ /* stay on local */ }
 }
@@ -1542,7 +1642,7 @@ function exerciseListHTML(mode){
   var chips = MUSCLES.map(function(mm){ return '<button class="chip'+(mm===m?" active":"")+'" data-muscle="'+mm+'">'+mm+"</button>"; }).join("");
   var rows = list.length ? list.map(function(e){
     var added = !!state.picker.justAdded[e.id];
-    var deleteBtn = mode==="tab" ? '<button class="icon-btn" data-delex="'+e.id+'" title="Remove from library">'+icon("trash")+"</button>" : "";
+    var deleteBtn = mode==="tab" ? '<button class="icon-btn" data-editex="'+e.id+'" title="Edit exercise" aria-label="Edit exercise">'+icon("edit")+"</button>"+'<button class="icon-btn" data-delex="'+e.id+'" title="Remove from library">'+icon("trash")+"</button>" : "";
     return '<div class="ex-row">'+
       '<div class="ex-row-body">'+muscleIconSvg(e.muscle)+'<div class="ex-row-text"><div class="ex-row-name">'+e.name+'</div><div class="ex-row-meta">'+e.muscle+" · "+e.equip+"</div></div></div>"+
       '<div class="ex-row-actions">'+
@@ -1720,6 +1820,11 @@ function bindAddButtons(root){
     });
   });
 }
+function bindEditButtons(root){
+  root.querySelectorAll("[data-editex]").forEach(function(btn){
+    btn.addEventListener("click", function(){ openExerciseEditor(btn.dataset.editex); });
+  });
+}
 function bindDeleteButtons(root){
   root.querySelectorAll("[data-delex]").forEach(function(btn){
     btn.addEventListener("click", function(){
@@ -1886,6 +1991,7 @@ function attachViewHandlers(){
     bindAddButtons(view);
     bindCustomExtras(view);
     bindDeleteButtons(view);
+    bindEditButtons(view);
   }
 
   if(state.tab==="plans"){
@@ -1971,7 +2077,7 @@ function renderPlans(){
     "</div>";
   }).join("");
   return '<div class="stack">'+cards+'</div>'+
-    '<button class="btn btn-outline" id="newProgramBtn" style="width:100%; margin-top:14px;">'+icon("plus")+" New Program</button>";
+    '<button class="btn btn-outline new-program-btn" id="newProgramBtn">'+icon("plus")+" New Program</button>";
 }
 
 function openProgramBuilder(existing){
@@ -2025,7 +2131,7 @@ function builderExListHTML(){
     return '<div class="builder-ex-row" data-drag-id="'+e.exerciseId+'" data-idx="'+idx+'">'+
       '<div class="builder-ex-top">'+
         '<button type="button" class="drag-handle" aria-label="Drag to reorder">'+icon("grip")+"</button>"+
-        '<div class="builder-ex-name">'+muscleIconSvg(info.muscle, true)+'<span>'+e.name+'</span></div>'+
+        '<div class="builder-ex-name">'+muscleIconSvg(info.muscle, true)+'<span>'+(info.name||e.name)+'</span></div>'+
         '<button class="icon-btn" data-rmbuilder="'+idx+'">'+icon("close")+"</button>"+
       "</div>"+
       '<div class="builder-ex-targets">'+
@@ -2406,7 +2512,8 @@ async function gatherExport(){
     app:"RepLedger", format:1, exportedAt:new Date().toISOString(),
     unit: state.unit,
     sessions: sessions, programs: programs,
-    customExercises: customs, hiddenBuiltIns: state.hiddenBuiltIns.slice()
+    customExercises: customs, hiddenBuiltIns: state.hiddenBuiltIns.slice(),
+    exerciseOverrides: JSON.parse(JSON.stringify(exerciseOverrides))
   };
 }
 
@@ -2460,8 +2567,9 @@ function importFromObject(obj){
   localStorage.setItem(PROGRAMS_LS_KEY, JSON.stringify(progs));
   localStorage.setItem(CUSTOM_LS_KEY, JSON.stringify(obj.customExercises||[]));
   localStorage.setItem(HIDDEN_LS_KEY, JSON.stringify(obj.hiddenBuiltIns||[]));
+  localStorage.setItem(OVERRIDES_LS_KEY, JSON.stringify(obj.exerciseOverrides||{}));
   if(obj.unit==="kg" || obj.unit==="lb"){ localStorage.setItem("repledger_unit", obj.unit); state.unit = obj.unit; }
-  loadLocal(); loadLocalCustom(); loadLocalPrograms(); loadLocalHidden();
+  loadLocal(); loadLocalCustom(); loadLocalPrograms(); loadLocalHidden(); loadLocalOverrides();
   state.today = null; state.todayId = null; ensureToday();
   return Object.keys(sess).length;
 }
